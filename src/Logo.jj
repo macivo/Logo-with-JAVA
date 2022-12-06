@@ -1,0 +1,291 @@
+//@Authors: Mac Müller
+options {
+   FORCE_LA_CHECK = true;
+   DEBUG_PARSER = true;
+   DEBUG_TOKEN_MANAGER = true;
+}
+
+PARSER_BEGIN(Logo)
+
+import java.lang.*;
+import java.io.*;
+import java.util.*;
+
+public class Logo {
+
+  static private int numRepeat = -1;
+  static private File javaFile, htmlFile;   // output files
+  static private PrintWriter pw;            // printwriter used for every output
+  static private int numIndent = 0;         // size of indentation
+  
+  // to pretty-print the translation
+  // uses numIndent and pw defined as static variables in LogoParser
+  // writes in pw the numIndent times the indent string
+  public static void indent() {
+    for (int i=0; i<numIndent; i++) { pw.print("   "); }
+  }
+
+  // Main method that reads the source file ".logo" and translates it
+  // into two files: ".java" ".html"
+  public static void main(String args[]) throws ParseException,
+                                                TokenMgrError,
+                                                IOException
+  {
+    // reads the source file ".logo" (first argument of command line)
+    BufferedReader in = new BufferedReader(new FileReader(args[0]));
+    Logo parser = new Logo(in);
+    try {
+      parser.start();
+      System.out.println("DONE");
+    }
+    catch (ParseException x) { System.out.println("Syntaxtic Error"); throw x; }
+    catch (TokenMgrError x)  { System.out.println("Lexical Error"); throw x; }
+  }
+}
+PARSER_END(Logo)
+
+// skip separators
+SKIP : { <" " | "\t" | "\n" | "\r"> }
+SKIP : { <"#" (~["\n","\r"])*> }
+
+// Constants, pre-defined, operators etc.
+TOKEN: { <ADD: "+">   | <SUB: "-">  | <MUL: "*"> | <DIV: "/"> }
+TOKEN: { <LPAR: "(">  | <RPAR: ")"> | <#PARSEP: ":"> }
+TOKEN: { <LBRA: "[">  | <RBRA: "]"> }
+TOKEN: { <EQ: "==">   | <NE: "!=">  }
+TOKEN: { <LT: "<">    | <GT: ">">   | <LE: "<="> | <GE: ">="> }
+TOKEN: { <AND: "AND"> | <OR: "OR"> }
+TOKEN: { <TRUE: "TRUE"> | <FALSE: "FALSE"> | <NOT: "NOT"> }
+// REPCOUNT is a pre-defined identifier rather than a keyword
+TOKEN: { <REPCOUNT: "REPCOUNT"> }
+// Keywords
+TOKEN: {
+  <CLEARSCREEN: "CS"> |
+  <PENDOWN: "PD">     | <PENUP: "PU">      |
+  <FORWARD: "FD">     | <BACKWARD: "BK">   |
+  <LEFTTURN: "LT">    | <RIGHTTURN: "RT">  |
+  <HIDETURTLE: "HT">  | <SHOWTURTLE: "ST"> |
+  <WAIT: "WAIT">      | <REPEAT: "REPEAT"> |
+  <IF: "IF">          | <IFELSE: "IFELSE"> |
+  <SUBROUTINE: "TO">  |
+  <LOGO: "LOGO">      | <END: "END">
+}
+// Numerical values, identifiers, and parameters
+TOKEN: { <#DIGIT:  ["0"-"9"]> }
+TOKEN: { <#LETTER: ["A"-"Z"]> }
+TOKEN: { <NUM: (<DIGIT>)+ | (<DIGIT>)+ "." (<DIGIT>)+ > }
+TOKEN: { <IDENTIFIER: <LETTER> ( <LETTER> | <DIGIT> )* > }
+TOKEN: { <PARAMETER: <PARSEP> <IDENTIFIER> > // removes parameter separator
+//        { matchedToken.image=image.substring(1,image.length()); }
+}
+
+void start() throws IOException: { Token t; String statement; String subroutine; }
+{
+  	// logo programs start with LOGO followed by an identifier
+  	<LOGO> t = <IDENTIFIER>
+	// Creation of the output files
+   {
+     // Create the HTML file for the applet
+     htmlFile = new File(t.image.toLowerCase() + ".html");
+     pw = new PrintWriter(new FileOutputStream(htmlFile));
+     pw.println("<html>");
+     pw.println("  <body>");
+     pw.println("  <applet code='" + t.image.toLowerCase() +
+                ".class'width=600 height=600></applet>");
+     pw.println("  </html>");
+     pw.println("</body>");
+     pw.close();
+     //Create the Java file and the class
+     javaFile = new File(t.image.toLowerCase() + ".java");
+     pw = new PrintWriter(new FileOutputStream(javaFile));
+     pw.println("import java.awt.Graphics;\n");
+     pw.println("public class " + t.image.toLowerCase() +
+                " extends java.applet.Applet {\n" );
+     numIndent++;
+     indent();
+     pw.println("private LogoPrimitives logo;\n");
+     indent();
+     pw.flush();
+   }
+  (subroutine())*
+// Open the necessary method "paint" of the applet
+   {
+     indent();
+     numIndent++;
+     pw.println("public void paint(Graphics g) {");
+     indent();
+     pw.println("logo = new LogoPrimitives(this);");
+     pw.println();
+   }
+  (statement())*
+// close the method "paint"
+   {
+     numIndent--;
+     indent();
+     pw.println("}");
+   }
+// close the class
+  <END>
+   { numIndent--; indent();
+     pw.println("}");
+     pw.flush();
+     pw.close();
+   }
+}
+
+// ADD THE REST OF THE JAVACC RULES WITH THE JAVA CODE
+void subroutine(): { Token token; boolean flag = true; }
+{
+	<SUBROUTINE> token = <IDENTIFIER>
+	{
+	  indent();
+	  pw.print("private void " + token.image.toLowerCase() + "(" );
+	  numIndent++;
+	}
+	( token = <PARAMETER>
+	{	  if(flag) flag = false;
+	  else pw.print(", ");
+	  pw.print("double " + token.image.substring(1).toLowerCase());
+	})*
+	{	  pw.print(") {\n");
+	}
+	(statement())*
+	{	  numIndent--;
+	  indent();
+	  pw.println("} \n");
+	}
+	<END>  
+}
+void statement():
+{String statement;}
+{
+   <CLEARSCREEN> 						{indent(); pw.println("logo.cs();");}
+   |<PENDOWN> 							{indent(); pw.println("logo.pd();");}
+   |<PENUP> 							{indent(); pw.println("logo.pu();");}
+   |(<FORWARD> statement = nExpr() 		{indent(); pw.println("logo.fd(" + statement + ");");})
+   |(<BACKWARD> statement = nExpr() 	{indent(); pw.println("logo.bk(" + statement + ");");})
+   |(<LEFTTURN> statement = nExpr()) 	{indent(); pw.println("logo.lt(" + statement + ");");}
+   |(<RIGHTTURN> statement = nExpr()) 	{indent(); pw.println("logo.rt(" + statement + ");");}
+   |<HIDETURTLE> 						{indent(); pw.println("logo.ht();");}
+   |<SHOWTURTLE> 						{indent(); pw.println("logo.st();");}
+   |(<WAIT> statement = nExpr() 		{indent(); pw.println("logo.wait(" + statement + ");");})
+   |(repeat())
+   |(ifToken())
+   |(ifElseToken())
+   |(identifier())
+}
+void repeat(): { String count; String nExpr; }
+{
+  <REPEAT> nExpr = nExpr() <LBRA>
+  {
+    count = "i" + ++numRepeat;
+    indent();
+    pw.println("for (int " + count + " = 1; " + count + " <= " + nExpr + "; " + count + "++) {");
+    numIndent++;
+  }
+  ((repeat())* (statement())* <RBRA>
+  {
+    numIndent--;
+    numRepeat--;
+    indent();
+    pw.println("}");
+  })
+}
+void ifToken(): { String bra; }
+{
+	<IF> bra = bExpr() < LBRA >
+	{
+	  indent();
+	  pw.println("if (" + bra + ") {");
+      numIndent++;
+	}
+	(statement())* <RBRA>
+    {
+        numIndent--;
+        indent();
+        pw.println("}");
+    }
+}
+void ifElseToken(): { String bra; }
+{
+   <IFELSE> bra = bExpr() <LBRA>
+    {
+         indent();
+         pw.println("if (" + bra + ") {");
+         numIndent++;
+    }
+    (statement())* <RBRA>
+     <LBRA>
+    {
+        numIndent--;
+        indent(); pw.println("} else {");
+        numIndent++;
+    }
+    (statement())* <RBRA>
+    {
+        numIndent--;
+        indent();
+        pw.println("}");
+    }
+}
+void identifier(): {Token token; boolean flag = true; String nExpr;}
+{
+    token = <IDENTIFIER>
+    {
+        indent();
+        pw.print(token.image.toLowerCase() + "(");
+    }
+    (
+        nExpr = nExpr() {
+            if(flag) flag = false;
+            else pw.print(", ");
+            pw.print(nExpr);
+        }
+    )*
+    {
+        pw.print(");\n");
+    }
+}
+String nFactor(): {String help;}
+{
+    <SUB> help = nFactorHelp() { return "-" + help; }
+    	| help = nFactorHelp() { return help;}
+}
+String nFactorHelp(): {Token token; String nExpr; String count;}
+{
+	token = <NUM> {	return token.image;	}
+	| <REPCOUNT> { return count = "i"+numRepeat; }
+	| token = <PARAMETER> {	return token.image.substring(1).toLowerCase(); }
+	| <LPAR> nExpr = nExpr() <RPAR> {	return "(" + nExpr + ")";	}
+}
+String nTerm(): {StringBuilder strbuilder = new StringBuilder(); Token token; String nFactor;}
+{
+    nFactor = nFactor(){strbuilder.append(nFactor);} ((token = <MUL> | token = <DIV>) nFactor = nFactor() {strbuilder.append(" " + token.image + " " + nFactor);})*
+    {return strbuilder.toString();}
+}
+
+String nExpr(): {StringBuilder strbuilder = new StringBuilder(); Token token; String nTerm;}
+{
+   nTerm = nTerm() {strbuilder.append(nTerm);} ((token = <ADD> | token = <SUB>) nTerm = nTerm() {strbuilder.append(" " + token.image + " " + nTerm);})*
+   {return strbuilder.toString();}
+}
+
+String bFactor():{Token token; String bExpar, nExpr, nExpr2;}
+{
+    <TRUE> {return "true";}| <FALSE> {return "false";}|
+    <NOT> <LPAR> bExpar = bExpr() <RPAR> {return "!(" + bExpar + ")";} |
+    nExpr = nExpr() (token = <EQ> |token = <NE> |token = <LT> |token = <GT> |token = <LE> |token = <GE>) nExpr2 = nExpr()
+    {return nExpr + " " + token.image + " " + nExpr2;}
+}
+
+String bTerm(): {StringBuilder strbuilder = new StringBuilder(); String bFactor;}
+{
+  bFactor = bFactor() {strbuilder.append(bFactor);} (<AND> bFactor = bFactor() {strbuilder.append(" && " + bFactor);})*
+  {return strbuilder.toString();}
+}
+
+String bExpr(): {StringBuilder strbuilder = new StringBuilder(); String bTerm;}
+{
+   bTerm = bTerm() {strbuilder.append(bTerm);} (<OR> bTerm = bTerm() {strbuilder.append(" || " + bTerm);})*
+   {return strbuilder.toString();}
+}
